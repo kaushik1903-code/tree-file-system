@@ -1,556 +1,398 @@
 # tree-file-system
-#ifndef FILE_SYSTEM_H
-#define FILE_SYSTEM_H
+/*
+ * Tree-Based File System Simulator in C
+ * =======================================
+ * Structures:
+ *   - N-ary tree   : filesystem hierarchy
+ *   - BST          : name-indexed search
+ * Features:
+ *   - mkdir, touch, ls, cd, pwd
+ *   - DFS / BFS traversal of current directory
+ *   - BST search (O(log n) average)
+ *   - Pretty tree display with connectors
+ */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
-
-#define MAX_NAME_LEN 256
-#define MAX_PATH_LEN 1024
-
-typedef enum {
-    NODE_FILE,
-    NODE_DIR
-} NodeType;
-
-typedef struct FileNode {
-    char name[MAX_NAME_LEN];
-    NodeType type;
-    struct FileNode **children;
-    int child_count;
-    int child_capacity;
-    struct FileNode *parent;
-} FileNode;
-
-typedef struct {
-    FileNode *root;
-} FileSystem;
-
-// Initialization
-FileSystem* fs_create();
-void fs_destroy(FileNode *node);
-
-// Directory operations
-bool fs_mkdir(FileNode *current, const char *dirname);
-FileNode* fs_cd(FileNode *current, const char *dirname);
-FileNode* fs_find_child(FileNode *current, const char *name);
-
-// File operations
-bool fs_touch(FileNode *current, const char *filename);
-
-// Display operations
-void fs_list_dfs(FileNode *node, int depth);
-void fs_list_bfs(FileNode *root);
-void fs_print_tree(FileNode *node, int depth, bool is_last);
-
-// Search operations (BST ordering)
-FileNode* fs_search_bst(FileNode *node, const char *name, int *comparisons);
-void fs_search_all(FileNode *node, const char *name);
-
-// Utility
-void fs_print_full_path(FileNode *node);
-FileNode* fs_get_parent(FileNode *node);
-
-#endif // FILE_SYSTEM_H
-#include "file_system.h"
-
-// Initialize file system
-FileSystem* fs_create() {
-    FileSystem *fs = (FileSystem*)malloc(sizeof(FileSystem));
-    fs->root = (FileNode*)malloc(sizeof(FileNode));
-    strcpy(fs->root->name, "/");
-    fs->root->type = NODE_DIR;
-    fs->root->children = (FileNode**)malloc(10 * sizeof(FileNode*));
-    fs->root->child_count = 0;
-    fs->root->child_capacity = 10;
-    fs->root->parent = NULL;
-    return fs;
-}
-
-// Destroy file system recursively
-void fs_destroy(FileNode *node) {
-    if (!node) return;
-    
-    for (int i = 0; i < node->child_count; i++) {
-        fs_destroy(node->children[i]);
-    }
-    
-    free(node->children);
-    free(node);
-}
-
-// Expand children array when needed
-static void expand_children(FileNode *node) {
-    if (node->child_count >= node->child_capacity) {
-        node->child_capacity *= 2;
-        node->children = (FileNode**)realloc(node->children, 
-                                            node->child_capacity * sizeof(FileNode*));
-    }
-}
-
-// Compare function for BST ordering (alphabetical)
-static int compare_names(const char *name1, const char *name2) {
-    return strcmp(name1, name2);
-}
-
-// Find child node by name (linear search)
-FileNode* fs_find_child(FileNode *current, const char *name) {
-    if (!current || current->type != NODE_DIR) return NULL;
-    
-    for (int i = 0; i < current->child_count; i++) {
-        if (strcmp(current->children[i]->name, name) == 0) {
-            return current->children[i];
-        }
-    }
-    return NULL;
-}
-
-// Create a new directory
-bool fs_mkdir(FileNode *current, const char *dirname) {
-    if (!current || current->type != NODE_DIR) {
-        printf("Error: Cannot create directory in a file\n");
-        return false;
-    }
-    
-    if (fs_find_child(current, dirname)) {
-        printf("Error: Directory '%s' already exists\n", dirname);
-        return false;
-    }
-    
-    expand_children(current);
-    
-    FileNode *new_dir = (FileNode*)malloc(sizeof(FileNode));
-    strcpy(new_dir->name, dirname);
-    new_dir->type = NODE_DIR;
-    new_dir->children = (FileNode**)malloc(10 * sizeof(FileNode*));
-    new_dir->child_count = 0;
-    new_dir->child_capacity = 10;
-    new_dir->parent = current;
-    
-    // Insert in sorted order (BST)
-    int insert_pos = current->child_count;
-    for (int i = 0; i < current->child_count; i++) {
-        if (compare_names(dirname, current->children[i]->name) < 0) {
-            insert_pos = i;
-            break;
-        }
-    }
-    
-    // Shift elements to make room
-    for (int i = current->child_count; i > insert_pos; i--) {
-        current->children[i] = current->children[i-1];
-    }
-    
-    current->children[insert_pos] = new_dir;
-    current->child_count++;
-    
-    printf("Directory '%s' created successfully\n", dirname);
-    return true;
-}
-
-// Create a new file
-bool fs_touch(FileNode *current, const char *filename) {
-    if (!current || current->type != NODE_DIR) {
-        printf("Error: Cannot create file in a file\n");
-        return false;
-    }
-    
-    if (fs_find_child(current, filename)) {
-        printf("Error: File '%s' already exists\n", filename);
-        return false;
-    }
-    
-    expand_children(current);
-    
-    FileNode *new_file = (FileNode*)malloc(sizeof(FileNode));
-    strcpy(new_file->name, filename);
-    new_file->type = NODE_FILE;
-    new_file->children = NULL;
-    new_file->child_count = 0;
-    new_file->child_capacity = 0;
-    new_file->parent = current;
-    
-    // Insert in sorted order (BST)
-    int insert_pos = current->child_count;
-    for (int i = 0; i < current->child_count; i++) {
-        if (compare_names(filename, current->children[i]->name) < 0) {
-            insert_pos = i;
-            break;
-        }
-    }
-    
-    // Shift elements to make room
-    for (int i = current->child_count; i > insert_pos; i--) {
-        current->children[i] = current->children[i-1];
-    }
-    
-    current->children[insert_pos] = new_file;
-    current->child_count++;
-    
-    printf("File '%s' created successfully\n", filename);
-    return true;
-}
-
-// Change directory
-FileNode* fs_cd(FileNode *current, const char *dirname) {
-    if (!current) return NULL;
-    
-    if (strcmp(dirname, "..") == 0) {
-        return current->parent ? current->parent : current;
-    }
-    
-    if (strcmp(dirname, "/") == 0) {
-        FileNode *node = current;
-        while (node->parent) {
-            node = node->parent;
-        }
-        return node;
-    }
-    
-    FileNode *child = fs_find_child(current, dirname);
-    if (!child) {
-        printf("Error: Directory '%s' not found\n", dirname);
-        return current;
-    }
-    
-    if (child->type != NODE_DIR) {
-        printf("Error: '%s' is not a directory\n", dirname);
-        return current;
-    }
-    
-    return child;
-}
-
-// DFS traversal for listing
-void fs_list_dfs(FileNode *node, int depth) {
-    if (!node) return;
-    
-    for (int i = 0; i < depth; i++) printf("  ");
-    
-    if (node->type == NODE_DIR) {
-        printf("📁 %s/\n", node->name);
-    } else {
-        printf("📄 %s\n", node->name);
-    }
-    
-    if (node->type == NODE_DIR) {
-        for (int i = 0; i < node->child_count; i++) {
-            fs_list_dfs(node->children[i], depth + 1);
-        }
-    }
-}
-
-// BFS traversal for listing
-void fs_list_bfs(FileNode *root) {
-    if (!root) return;
-    
-    // Simple queue implementation using array
-    FileNode **queue = (FileNode**)malloc(1000 * sizeof(FileNode*));
-    int front = 0, rear = 0;
-    
-    queue[rear++] = root;
-    int depth_array[1000] = {0};
-    
-    int idx = 0;
-    depth_array[idx] = 0;
-    
-    while (front < rear) {
-        FileNode *current = queue[front];
-        int current_depth = depth_array[front];
-        front++;
-        
-        for (int i = 0; i < current_depth; i++) printf("  ");
-        
-        if (current->type == NODE_DIR) {
-            printf("📁 %s/\n", current->name);
-        } else {
-            printf("📄 %s\n", current->name);
-        }
-        
-        if (current->type == NODE_DIR) {
-            for (int i = 0; i < current->child_count; i++) {
-                queue[rear] = current->children[i];
-                depth_array[rear] = current_depth + 1;
-                rear++;
-            }
-        }
-    }
-    
-    free(queue);
-}
-
-// Print full directory tree with indentation
-void fs_print_tree(FileNode *node, int depth, bool is_last) {
-    if (!node) return;
-    
-    for (int i = 0; i < depth; i++) {
-        if (i == depth - 1) {
-            printf(is_last ? "��── " : "├── ");
-        } else {
-            printf("│   ");
-        }
-    }
-    
-    if (depth > 0) {
-        if (node->type == NODE_DIR) {
-            printf("📁 %s/\n", node->name);
-        } else {
-            printf("📄 %s\n", node->name);
-        }
-    } else {
-        printf("📁 %s/\n", node->name);
-    }
-    
-    if (node->type == NODE_DIR) {
-        for (int i = 0; i < node->child_count; i++) {
-            bool is_last_child = (i == node->child_count - 1);
-            fs_print_tree(node->children[i], depth + 1, is_last_child);
-        }
-    }
-}
-
-// Search using BST ordering (binary search on sorted children)
-FileNode* fs_search_bst(FileNode *node, const char *name, int *comparisons) {
-    if (!node) return NULL;
-    
-    *comparisons = 0;
-    
-    if (node->type == NODE_DIR) {
-        int left = 0, right = node->child_count - 1;
-        
-        while (left <= right) {
-            int mid = (left + right) / 2;
-            int cmp = compare_names(name, node->children[mid]->name);
-            (*comparisons)++;
-            
-            if (cmp == 0) {
-                return node->children[mid];
-            } else if (cmp < 0) {
-                right = mid - 1;
-            } else {
-                left = mid + 1;
-            }
-        }
-    }
-    
-    return NULL;
-}
-
-// Search all occurrences recursively
-void fs_search_all(FileNode *node, const char *name) {
-    if (!node) return;
-    
-    if (strcmp(node->name, name) == 0) {
-        printf("Found: ");
-        fs_print_full_path(node);
-        printf("\n");
-    }
-    
-    if (node->type == NODE_DIR) {
-        for (int i = 0; i < node->child_count; i++) {
-            fs_search_all(node->children[i], name);
-        }
-    }
-}
-
-// Print full path of a node
-void fs_print_full_path(FileNode *node) {
-    if (!node) return;
-    
-    if (node->parent) {
-        fs_print_full_path(node->parent);
-        printf("/%s", node->name);
-    } else {
-        printf("/");
-    }
-}
-
-// Get parent directory
-FileNode* fs_get_parent(FileNode *node) {
-    return node ? node->parent : NULL;
-}
-#include "file_system.h"
 #include <ctype.h>
 
-#define MAX_COMMAND_LEN 512
+#define MAX_NAME  128
+#define MAX_PATH  1024
+#define MAX_Q     2048
 
-typedef struct {
-    FileNode *current_dir;
-    FileSystem *fs;
-} Shell;
+typedef enum { TYPE_DIR, TYPE_FILE } NodeType;
 
-void print_prompt(FileNode *node) {
-    printf("fs");
-    FileNode *temp = node;
-    int depth = 0;
-    
-    while (temp->parent) {
-        temp = temp->parent;
-        depth++;
-    }
-    
-    if (depth == 0) {
-        printf(":/# ");
+/* ─── N-ary tree ──────────────────────────────────────────────── */
+typedef struct FSNode {
+    char         name[MAX_NAME];
+    NodeType     type;
+    struct FSNode *parent;
+    struct FSNode *first_child;
+    struct FSNode *next_sibling;
+} FSNode;
+
+/* ─── BST ─────────────────────────────────────────────────────── */
+typedef struct BSTNode {
+    FSNode       *fs;
+    struct BSTNode *left, *right;
+} BSTNode;
+
+/* ─── Globals ─────────────────────────────────────────────────── */
+static FSNode  *root;
+static FSNode  *cwd;
+static BSTNode *bst_root;
+
+/* ══ BST ══════════════════════════════════════════════════════════ */
+
+static BSTNode *bst_new(FSNode *fs) {
+    BSTNode *n = malloc(sizeof *n);
+    n->fs = fs; n->left = n->right = NULL;
+    return n;
+}
+
+static BSTNode *bst_insert(BSTNode *node, FSNode *fs) {
+    if (!node) return bst_new(fs);
+    int c = strcmp(fs->name, node->fs->name);
+    if      (c < 0) node->left  = bst_insert(node->left,  fs);
+    else if (c > 0) node->right = bst_insert(node->right, fs);
+    /* equal name → go right subtree so both survive */
+    else            node->right = bst_insert(node->right, fs);
+    return node;
+}
+
+static void bst_search(BSTNode *node, const char *name,
+                        FSNode **out, int *cnt) {
+    if (!node) return;
+    int c = strcmp(name, node->fs->name);
+    if (c == 0) {
+        out[(*cnt)++] = node->fs;
+        bst_search(node->left,  name, out, cnt);
+        bst_search(node->right, name, out, cnt);
+    } else if (c < 0) {
+        bst_search(node->left,  name, out, cnt);
     } else {
-        printf(":~");
-        temp = node;
-        while (temp->parent && temp->parent->parent) {
-            temp = temp->parent;
-        }
-        printf("/%s# ", temp->name);
+        bst_search(node->right, name, out, cnt);
     }
-    fflush(stdout);
 }
 
-void print_help() {
-    printf("\n========== FILE SYSTEM COMMANDS ==========\n");
-    printf("mkdir <dirname>    - Create a directory\n");
-    printf("touch <filename>   - Create a file\n");
-    printf("cd <dirname>       - Change directory (use '..' to go up, '/' for root)\n");
-    printf("ls                 - List files (DFS traversal)\n");
-    printf("ls-bfs             - List files (BFS traversal)\n");
-    printf("tree               - Display full directory tree\n");
-    printf("search <name>      - Search for file/directory\n");
-    printf("search-bst <name>  - Search using BST ordering (in current dir)\n");
-    printf("pwd                - Print working directory\n");
-    printf("help               - Show this help\n");
-    printf("exit               - Exit the shell\n");
-    printf("==========================================\n\n");
+static void bst_free(BSTNode *n) {
+    if (!n) return;
+    bst_free(n->left); bst_free(n->right); free(n);
 }
 
-int main() {
-    FileSystem *fs = fs_create();
-    Shell shell;
-    shell.fs = fs;
-    shell.current_dir = fs->root;
-    
-    char command[MAX_COMMAND_LEN];
-    
-    printf("\n╔════════════════════════════════════════╗\n");
-    printf("║   TREE-BASED FILE SYSTEM IN C          ║\n");
-    printf("║   Type 'help' for available commands   ║\n");
-    printf("╚════════════════════════════════════════╝\n\n");
-    
-    while (true) {
-        print_prompt(shell.current_dir);
-        
-        if (!fgets(command, sizeof(command), stdin)) {
-            break;
-        }
-        
-        // Remove trailing newline
-        command[strcspn(command, "\n")] = '\0';
-        
-        // Skip empty commands
-        if (strlen(command) == 0) continue;
-        
-        // Parse command
-        char *cmd = strtok(command, " ");
-        if (!cmd) continue;
-        
-        if (strcmp(cmd, "exit") == 0) {
-            printf("Exiting file system...\n");
-            break;
-        }
-        else if (strcmp(cmd, "help") == 0) {
-            print_help();
-        }
-        else if (strcmp(cmd, "mkdir") == 0) {
-            char *dirname = strtok(NULL, " ");
-            if (!dirname) {
-                printf("Usage: mkdir <dirname>\n");
-            } else {
-                fs_mkdir(shell.current_dir, dirname);
-            }
-        }
-        else if (strcmp(cmd, "touch") == 0) {
-            char *filename = strtok(NULL, " ");
-            if (!filename) {
-                printf("Usage: touch <filename>\n");
-            } else {
-                fs_touch(shell.current_dir, filename);
-            }
-        }
-        else if (strcmp(cmd, "cd") == 0) {
-            char *dirname = strtok(NULL, " ");
-            if (!dirname) {
-                printf("Usage: cd <dirname>\n");
-            } else {
-                shell.current_dir = fs_cd(shell.current_dir, dirname);
-            }
-        }
-        else if (strcmp(cmd, "ls") == 0) {
-            printf("\n--- DFS Traversal ---\n");
-            if (shell.current_dir->child_count == 0) {
-                printf("(empty directory)\n");
-            } else {
-                for (int i = 0; i < shell.current_dir->child_count; i++) {
-                    fs_list_dfs(shell.current_dir->children[i], 0);
-                }
-            }
-            printf("\n");
-        }
-        else if (strcmp(cmd, "ls-bfs") == 0) {
-            printf("\n--- BFS Traversal ---\n");
-            if (shell.current_dir->child_count == 0) {
-                printf("(empty directory)\n");
-            } else {
-                for (int i = 0; i < shell.current_dir->child_count; i++) {
-                    fs_list_bfs(shell.current_dir->children[i]);
-                }
-            }
-            printf("\n");
-        }
-        else if (strcmp(cmd, "tree") == 0) {
-            printf("\n--- Full Directory Tree ---\n");
-            fs_print_tree(shell.current_dir, 0, true);
-            printf("\n");
-        }
-        else if (strcmp(cmd, "pwd") == 0) {
-            printf("Path: ");
-            fs_print_full_path(shell.current_dir);
-            printf("\n\n");
-        }
-        else if (strcmp(cmd, "search") == 0) {
-            char *name = strtok(NULL, " ");
-            if (!name) {
-                printf("Usage: search <name>\n");
-            } else {
-                printf("\nSearching for '%s'...\n", name);
-                FileNode *root = shell.current_dir;
-                while (root->parent) root = root->parent;
-                fs_search_all(root, name);
-                printf("\n");
-            }
-        }
-        else if (strcmp(cmd, "search-bst") == 0) {
-            char *name = strtok(NULL, " ");
-            if (!name) {
-                printf("Usage: search-bst <name>\n");
-            } else {
-                int comparisons = 0;
-                FileNode *result = fs_search_bst(shell.current_dir, name, &comparisons);
-                printf("\nBST Search for '%s':\n", name);
-                printf("Comparisons: %d\n", comparisons);
-                if (result) {
-                    printf("Found: %s (%s)\n", result->name, 
-                           result->type == NODE_DIR ? "directory" : "file");
-                } else {
-                    printf("Not found in current directory\n");
-                }
-                printf("\n");
-            }
-        }
-        else {
-            printf("Unknown command: '%s'. Type 'help' for available commands.\n\n", cmd);
-        }
+/* ══ Filesystem helpers ═══════════════════════════════════════════ */
+
+static FSNode *fs_new(const char *name, NodeType t, FSNode *parent) {
+    FSNode *n = malloc(sizeof *n);
+    strncpy(n->name, name, MAX_NAME-1); n->name[MAX_NAME-1] = '\0';
+    n->type = t; n->parent = parent;
+    n->first_child = n->next_sibling = NULL;
+    return n;
+}
+
+/* Insert child keeping siblings alphabetically sorted */
+static void fs_add_child(FSNode *parent, FSNode *child) {
+    child->parent = parent;
+    if (!parent->first_child ||
+        strcmp(child->name, parent->first_child->name) < 0) {
+        child->next_sibling = parent->first_child;
+        parent->first_child = child;
+        return;
     }
-    
-    // Cleanup
-    fs_destroy(fs->root);
-    free(fs);
-    
+    FSNode *p = parent->first_child;
+    while (p->next_sibling &&
+           strcmp(child->name, p->next_sibling->name) > 0)
+        p = p->next_sibling;
+    child->next_sibling = p->next_sibling;
+    p->next_sibling = child;
+}
+
+static FSNode *fs_child(FSNode *parent, const char *name) {
+    FSNode *c = parent->first_child;
+    while (c) { if (!strcmp(c->name, name)) return c; c = c->next_sibling; }
+    return NULL;
+}
+
+static void fs_path(FSNode *n, char *buf, size_t sz) {
+    if (!n->parent) { strncpy(buf, "/", sz); return; }
+    char tmp[MAX_PATH];
+    fs_path(n->parent, tmp, sizeof tmp);
+    if (!strcmp(tmp, "/")) snprintf(buf, sz, "/%s", n->name);
+    else                   snprintf(buf, sz, "%s/%s", tmp, n->name);
+}
+
+static void fs_free(FSNode *n) {
+    if (!n) return;
+    fs_free(n->first_child); fs_free(n->next_sibling); free(n);
+}
+
+/* ══ DFS (pre-order, subtree only – no sibling walk at top) ════════ */
+
+/* Recurse only into first_child; siblings are iterated by the caller */
+static void dfs_subtree(FSNode *n, int depth) {
+    if (!n) return;
+    for (int i = 0; i < depth*2; i++) putchar(' ');
+    printf("%-7s %s\n",
+           n->type == TYPE_DIR ? "[DIR]" : "[FILE]",
+           n->name);
+    FSNode *child = n->first_child;
+    while (child) {
+        dfs_subtree(child, depth+1);
+        child = child->next_sibling;
+    }
+}
+
+static void cmd_dfs(FSNode *dir) {
+    printf("\n=== DFS traversal of [%s] ===\n", dir->name[0] ? dir->name : "/");
+    FSNode *c = dir->first_child;
+    if (!c) { puts("  (empty)\n"); return; }
+    while (c) {
+        dfs_subtree(c, 1);
+        c = c->next_sibling;
+    }
+    putchar('\n');
+}
+
+/* ══ BFS ══════════════════════════════════════════════════════════ */
+
+static void cmd_bfs(FSNode *dir) {
+    printf("\n=== BFS traversal of [%s] ===\n", dir->name[0] ? dir->name : "/");
+    FSNode *q[MAX_Q];
+    int head = 0, tail = 0, level_end = 0, level = 1;
+
+    FSNode *c = dir->first_child;
+    while (c) { q[tail++] = c; c = c->next_sibling; }
+    if (head == tail) { puts("  (empty)\n"); return; }
+
+    level_end = tail;
+    while (head < tail) {
+        if (head == level_end) {
+            level++;
+            level_end = tail;
+        }
+        FSNode *cur = q[head++];
+        printf("  L%-2d  %-7s %s\n",
+               level,
+               cur->type == TYPE_DIR ? "[DIR]" : "[FILE]",
+               cur->name);
+        c = cur->first_child;
+        while (c && tail < MAX_Q) { q[tail++] = c; c = c->next_sibling; }
+    }
+    putchar('\n');
+}
+
+/* ══ Pretty tree ══════════════════════════════════════════════════ */
+
+static void print_tree(FSNode *n, const char *prefix, int is_last) {
+    if (!n) return;
+    printf("%s%s%s%s\n",
+           prefix,
+           is_last ? "\\-- " : "|-- ",
+           n->name,
+           n->type == TYPE_DIR ? "/" : "");
+    char np[MAX_PATH];
+    snprintf(np, sizeof np, "%s%s", prefix, is_last ? "    " : "|   ");
+    FSNode *child = n->first_child;
+    while (child) {
+        print_tree(child, np, child->next_sibling == NULL);
+        child = child->next_sibling;
+    }
+}
+
+static void cmd_tree(void) {
+    puts("\n/");
+    FSNode *child = root->first_child;
+    while (child) {
+        print_tree(child, "", child->next_sibling == NULL);
+        child = child->next_sibling;
+    }
+    putchar('\n');
+}
+
+/* ══ User commands ════════════════════════════════════════════════ */
+
+static void cmd_mkdir(const char *name) {
+    if (fs_child(cwd, name)) { printf("Error: '%s' already exists.\n", name); return; }
+    FSNode *d = fs_new(name, TYPE_DIR, cwd);
+    fs_add_child(cwd, d);
+    bst_root = bst_insert(bst_root, d);
+    printf("Directory '%s' created.\n", name);
+}
+
+static void cmd_touch(const char *name) {
+    if (fs_child(cwd, name)) { printf("Error: '%s' already exists.\n", name); return; }
+    FSNode *f = fs_new(name, TYPE_FILE, cwd);
+    fs_add_child(cwd, f);
+    bst_root = bst_insert(bst_root, f);
+    printf("File '%s' created.\n", name);
+}
+
+static void cmd_ls(void) {
+    printf("\nContents of [%s]:\n", cwd->name[0] ? cwd->name : "/");
+    FSNode *c = cwd->first_child;
+    if (!c) { puts("  (empty)\n"); return; }
+    while (c) {
+        printf("  %-7s %s\n",
+               c->type == TYPE_DIR ? "[DIR]" : "[FILE]",
+               c->name);
+        c = c->next_sibling;
+    }
+    putchar('\n');
+}
+
+static void cmd_cd(const char *name) {
+    if (!strcmp(name, ".."))  { if (cwd->parent) cwd = cwd->parent; else puts("Already at root."); return; }
+    if (!strcmp(name, "/"))   { cwd = root; return; }
+    FSNode *t = fs_child(cwd, name);
+    if (!t)                    { printf("Error: '%s' not found.\n",     name); return; }
+    if (t->type == TYPE_FILE)  { printf("Error: '%s' is a file.\n",     name); return; }
+    cwd = t;
+}
+
+static void cmd_pwd(void) {
+    char path[MAX_PATH];
+    fs_path(cwd, path, sizeof path);
+    if (!path[0]) strcpy(path, "/");
+    printf("%s\n", path);
+}
+
+static void cmd_search(const char *name) {
+    FSNode *res[MAX_Q]; int cnt = 0;
+    bst_search(bst_root, name, res, &cnt);
+    if (!cnt) { printf("Not found: '%s'\n", name); return; }
+    printf("\nBST search results for '%s':\n", name);
+    for (int i = 0; i < cnt; i++) {
+        char path[MAX_PATH];
+        fs_path(res[i], path, sizeof path);
+        printf("  %-7s %s\n",
+               res[i]->type == TYPE_DIR ? "[DIR]" : "[FILE]",
+               path);
+    }
+    putchar('\n');
+}
+
+/* ══ Seed helpers (silent) ════════════════════════════════════════ */
+static void smkdir(const char *n) {
+    FSNode *d = fs_new(n,TYPE_DIR,cwd); fs_add_child(cwd,d);
+    bst_root = bst_insert(bst_root,d);
+}
+static void stouch(const char *n) {
+    FSNode *f = fs_new(n,TYPE_FILE,cwd); fs_add_child(cwd,f);
+    bst_root = bst_insert(bst_root,f);
+}
+static void scd(const char *n) {
+    if (!strcmp(n,"..")) { if (cwd->parent) cwd=cwd->parent; return; }
+    FSNode *t = fs_child(cwd,n);
+    if (t && t->type==TYPE_DIR) cwd=t;
+}
+
+static void seed(void) {
+    smkdir("home");         scd("home");
+      smkdir("alice");      scd("alice");
+        stouch("notes.txt");
+        stouch("resume.pdf");
+        smkdir("projects"); scd("projects");
+          stouch("Makefile");
+          stouch("main.c");
+          smkdir("libs");   scd("libs");
+            stouch("utils.c");
+            stouch("utils.h");
+          scd("..");
+        scd("..");
+      scd("..");
+      smkdir("bob");        scd("bob");
+        stouch("photo.png");
+        smkdir("docs");     scd("docs");
+          stouch("readme.md");
+        scd("..");
+      scd("..");
+    scd("..");
+    smkdir("etc");          scd("etc");
+      stouch("hosts");
+      stouch("passwd");
+      smkdir("nginx");      scd("nginx");
+        stouch("mime.types");
+        stouch("nginx.conf");
+      scd("..");
+    scd("..");
+    smkdir("var");          scd("var");
+      smkdir("log");        scd("log");
+        stouch("auth.log");
+        stouch("syslog");
+      scd("..");
+    scd("..");
+    cwd = root;
+}
+
+/* ══ Help & main loop ═════════════════════════════════════════════ */
+
+static void help(void) {
+    puts("\nAvailable commands:");
+    puts("  mkdir <name>       Create directory in current location");
+    puts("  touch <name>       Create file in current location");
+    puts("  ls                 List current directory");
+    puts("  cd <name|..|/>     Change directory");
+    puts("  pwd                Show current path");
+    puts("  dfs                DFS traversal from current directory");
+    puts("  bfs                BFS traversal from current directory");
+    puts("  tree               Full tree from filesystem root");
+    puts("  search <name>      BST-based search by name");
+    puts("  help               Show this help");
+    puts("  exit               Quit\n");
+}
+
+static char *trim(char *s) {
+    while (isspace((unsigned char)*s)) s++;
+    char *e = s + strlen(s) - 1;
+    while (e > s && isspace((unsigned char)*e)) *e-- = '\0';
+    return s;
+}
+
+int main(void) {
+    root = fs_new("", TYPE_DIR, NULL);
+    cwd  = root; bst_root = NULL;
+
+    puts("=========================================");
+    puts("  Tree-Based File System Simulator (C)  ");
+    puts("=========================================");
+    puts("Seeding sample filesystem...");
+    seed();
+    puts("Ready. Type 'help' for commands.\n");
+
+    char line[512];
+    while (1) {
+        char path[MAX_PATH];
+        fs_path(cwd, path, sizeof path);
+        if (!path[0]) strcpy(path, "/");
+        printf("%s $ ", path);
+        fflush(stdout);
+
+        if (!fgets(line, sizeof line, stdin)) break;
+        char *in = trim(line);
+        if (!in[0]) continue;
+
+        char cmd[64]={0}, arg[MAX_NAME]={0};
+        sscanf(in, "%63s %127[^\n]", cmd, arg);
+        /* trim arg too */
+        char *a = trim(arg);
+
+        if      (!strcmp(cmd,"exit"))   break;
+        else if (!strcmp(cmd,"help"))   help();
+        else if (!strcmp(cmd,"pwd"))    cmd_pwd();
+        else if (!strcmp(cmd,"ls"))     cmd_ls();
+        else if (!strcmp(cmd,"tree"))   cmd_tree();
+        else if (!strcmp(cmd,"dfs"))    cmd_dfs(cwd);
+        else if (!strcmp(cmd,"bfs"))    cmd_bfs(cwd);
+        else if (!strcmp(cmd,"mkdir"))  { if(*a) cmd_mkdir(a); else puts("Usage: mkdir <name>"); }
+        else if (!strcmp(cmd,"touch"))  { if(*a) cmd_touch(a); else puts("Usage: touch <name>"); }
+        else if (!strcmp(cmd,"cd"))     { if(*a) cmd_cd(a);    else puts("Usage: cd <name|..|/>"); }
+        else if (!strcmp(cmd,"search")) { if(*a) cmd_search(a);else puts("Usage: search <name>"); }
+        else printf("Unknown command: '%s'. Type 'help'.\n", cmd);
+    }
+
+    fs_free(root);
+    bst_free(bst_root);
+    puts("Goodbye.");
     return 0;
 }
